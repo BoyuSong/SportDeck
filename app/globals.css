@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f7f5ee;
+  --foreground: #14202a;
+  --surface: rgba(255, 255, 255, 0.82);
+  --surface-muted: #edf1f5;
+  --surface-strong: #0f172a;
+  --surface-strong-foreground: #f8fafc;
+  --border: rgba(148, 163, 184, 0.45);
+  --accent-soft: rgba(251, 191, 36, 0.18);
+  --accent-text: #b45309;
+  --hero-background: radial-gradient(circle at top, #fff7ed 0%, #fffbeb 28%, #f8fafc 72%);
+  --shadow-hero: 0 30px 80px -40px rgba(146, 64, 14, 0.45);
+}
+
+html.dark {
+  --background: #09111b;
+  --foreground: #e5edf6;
+  --surface: rgba(15, 23, 42, 0.86);
+  --surface-muted: #132030;
+  --surface-strong: #f8fafc;
+  --surface-strong-foreground: #0f172a;
+  --border: rgba(100, 116, 139, 0.45);
+  --accent-soft: rgba(245, 158, 11, 0.16);
+  --accent-text: #fbbf24;
+  --hero-background: radial-gradient(circle at top, #172033 0%, #0f172a 38%, #09111b 78%);
+  --shadow-hero: 0 30px 80px -40px rgba(15, 23, 42, 0.9);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}

@@ -1,0 +1,14 @@
+.git
+.gitignore
+.next
+node_modules
+npm-debug.log*
+Dockerfile*
+docker-compose*.yaml
+README.md
+docs.pdf
+postman_collection.json
+openapi.yaml
+prisma/dev.db
+.env
+.env.*

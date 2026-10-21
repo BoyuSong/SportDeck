@@ -1,0 +1,161 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sportsdeck}
+      POSTGRES_USER: ${POSTGRES_USER:-sportsdeck}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sportsdeck}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sportsdeck} -d ${POSTGRES_DB:-sportsdeck}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app-init:
+    image: sportsdeck-app:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_GITHUB_CLIENT_ID: ${NEXT_PUBLIC_GITHUB_CLIENT_ID:-}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sportsdeck}:${POSTGRES_PASSWORD:-sportsdeck}@db:5432/${POSTGRES_DB:-sportsdeck}?schema=public
+      INIT_LEAGUE_DATA: ${INIT_LEAGUE_DATA:-true}
+      INIT_SAMPLE_DATA: ${INIT_SAMPLE_DATA:-true}
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
+      FOOTBALL_DATA_COMPETITION: ${FOOTBALL_DATA_COMPETITION:-PL}
+      FOOTBALL_DATA_SEASON: ${FOOTBALL_DATA_SEASON:-}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-sportsdeck-demo}
+      CACHE_HOST: cache
+      CACHE_PORT: 6379
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh}
+      JWT_ACCESS_EXPIRES_MINUTES: ${JWT_ACCESS_EXPIRES_MINUTES:-15}
+      JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-7}
+      AI_MODERATOR: ${AI_MODERATOR:-}
+      AI_MODERATOR_API: ${AI_MODERATOR_API:-}
+      AI_TRANSLATOR: ${AI_TRANSLATOR:-}
+      AI_TRANSLATOR_API: ${AI_TRANSLATOR_API:-}
+      AI_SENTIMENT: ${AI_SENTIMENT:-}
+      AI_SENTIMENT_API: ${AI_SENTIMENT_API:-}
+      AI_DAILY_DIGEST: ${AI_DAILY_DIGEST:-}
+      AI_DAILY_DIGEST_API: ${AI_DAILY_DIGEST_API:-}
+    command: ["sh", "./docker/init.sh"]
+
+  app:
+    image: sportsdeck-app:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_GITHUB_CLIENT_ID: ${NEXT_PUBLIC_GITHUB_CLIENT_ID:-}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      app-init:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sportsdeck}:${POSTGRES_PASSWORD:-sportsdeck}@db:5432/${POSTGRES_DB:-sportsdeck}?schema=public
+      CACHE_HOST: cache
+      CACHE_PORT: 6379
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh}
+      JWT_ACCESS_EXPIRES_MINUTES: ${JWT_ACCESS_EXPIRES_MINUTES:-15}
+      JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-7}
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
+      FOOTBALL_DATA_COMPETITION: ${FOOTBALL_DATA_COMPETITION:-PL}
+      FOOTBALL_DATA_SEASON: ${FOOTBALL_DATA_SEASON:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+      NEXT_PUBLIC_GITHUB_CLIENT_ID: ${NEXT_PUBLIC_GITHUB_CLIENT_ID:-}
+      AI_MODERATOR: ${AI_MODERATOR:-}
+      AI_MODERATOR_API: ${AI_MODERATOR_API:-}
+      AI_TRANSLATOR: ${AI_TRANSLATOR:-}
+      AI_TRANSLATOR_API: ${AI_TRANSLATOR_API:-}
+      AI_SENTIMENT: ${AI_SENTIMENT:-}
+      AI_SENTIMENT_API: ${AI_SENTIMENT_API:-}
+      AI_DAILY_DIGEST: ${AI_DAILY_DIGEST:-}
+      AI_DAILY_DIGEST_API: ${AI_DAILY_DIGEST_API:-}
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  league-sync:
+    image: sportsdeck-app:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_GITHUB_CLIENT_ID: ${NEXT_PUBLIC_GITHUB_CLIENT_ID:-}
+    restart: unless-stopped
+    profiles:
+      - league-sync
+    depends_on:
+      db:
+        condition: service_healthy
+      app-init:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sportsdeck}:${POSTGRES_PASSWORD:-sportsdeck}@db:5432/${POSTGRES_DB:-sportsdeck}?schema=public
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
+      FOOTBALL_DATA_COMPETITION: ${FOOTBALL_DATA_COMPETITION:-PL}
+      FOOTBALL_DATA_SEASON: ${FOOTBALL_DATA_SEASON:-}
+      LEAGUE_SYNC_INTERVAL_HOURS: ${LEAGUE_SYNC_INTERVAL_HOURS:-24}
+      LEAGUE_SYNC_RUN_IMMEDIATELY: ${LEAGUE_SYNC_RUN_IMMEDIATELY:-false}
+    command: ["node", "scripts/runLeagueSyncLoop.ts"]
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-80}:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  postgres_data:

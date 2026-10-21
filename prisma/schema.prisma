@@ -1,0 +1,480 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  relationMode = "foreignKeys"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum ThreadType {
+  GENERAL
+  TEAM
+  MATCH
+}
+
+enum ContentStatus {
+  VISIBLE
+  HIDDEN
+  LOCKED
+}
+
+enum ReportStatus {
+  OPEN
+  DISMISSED
+  APPROVED
+}
+
+enum BanStatus {
+  NOT_BANNED
+  BANNED
+}
+
+enum FeedEventType {
+  FOLLOWED_USER_THREAD
+  FOLLOWED_USER_POST
+  FOLLOWED_USER_REPLY
+  COMMENT_ON_MY_POST
+  COMMENT_ON_MY_THREAD
+  FAVORITE_TEAM_NEW_THREAD
+}
+/*
+enum AIVerdict {
+  SAFE
+  SUSPICIOUS
+  INAPPROPRIATE
+}
+*/
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  passwordHash  String?
+  username      String    @unique
+  avatarUrl     String?
+  role          UserRole  @default(USER)
+  banStatus     BanStatus @default(NOT_BANNED)
+  banReason     String?
+  bannedAt      DateTime?
+
+  favoriteTeamId Int?
+  favoriteTeam   Team?     @relation(fields: [favoriteTeamId], references: [id])
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // authored content
+  threads       Thread[]
+  posts         Post[]
+  postRevisions PostRevision[]
+  replies       Reply[]
+  replyRevisions ReplyRevision[]
+  polls         Poll[]
+  pollVotes     PollVote[]
+
+  // social
+  following     Follow[]  @relation("following")
+  followers     Follow[]  @relation("followers")
+
+  // moderation
+  reportsMade   Report[]  @relation("reportsMade")
+  actionsTaken  ModerationAction[] @relation("actionsTaken")
+  appeals       Appeal[]
+  oauthAccounts OAuthAccount[]
+  feedEvents    FeedEvent[]
+  feedGroupStates FeedGroupState[]
+
+  @@index([favoriteTeamId])
+}
+
+model RevokedToken {
+  id        Int      @id @default(autoincrement())
+  tokenHash String   @unique
+  tokenType String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model OAuthAccount {
+  id                Int      @id @default(autoincrement())
+  userId            Int
+  provider          String
+  providerAccountId String
+  email             String?
+  createdAt         DateTime @default(now())
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model FeedEvent {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  actorId   Int?
+  type      FeedEventType
+  threadId  Int?
+  postId    Int?
+  replyId   Int?
+  teamId    Int?
+  matchId   Int?
+  groupKey  String
+  message   String?
+  createdAt DateTime      @default(now())
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, groupKey, createdAt])
+}
+
+model FeedGroupState {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  groupKey   String
+  lastReadAt DateTime?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupKey])
+  @@index([userId, lastReadAt])
+}
+
+model Follow {
+  id          Int      @id @default(autoincrement())
+  followerId  Int
+  followingId Int
+  createdAt   DateTime @default(now())
+
+  follower    User @relation("following", fields: [followerId], references: [id])
+  following   User @relation("followers", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+  @@index([followingId, createdAt])
+}
+
+model Team {
+  id         Int     @id @default(autoincrement())
+  externalId Int     @unique  // external sports API
+  name       String
+  shortName  String?
+  crestUrl   String?
+  venue      String?
+
+  // links
+  usersFavorited User[]
+  homeMatches    Match[] @relation("homeTeam")
+  awayMatches    Match[] @relation("awayTeam")
+  threads        Thread[] // TEAM forum
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Match {
+  id            Int      @id @default(autoincrement())
+  externalId    Int      @unique // external API match id
+  utcDate       DateTime
+  status        String   // SCHEDULED / FINISHED
+  matchday      Int?
+  stage         String?  // group/playoffs
+
+  homeTeamId    Int
+  awayTeamId    Int
+  homeTeam      Team     @relation("homeTeam", fields: [homeTeamId], references: [id])
+  awayTeam      Team     @relation("awayTeam", fields: [awayTeamId], references: [id])
+
+  venue         String?
+  scoreHome     Int?
+  scoreAway     Int?
+
+  // auto thread
+  matchThread   Thread?
+
+  // caching
+  lastFetchedAt DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([utcDate])
+  @@index([matchday])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+}
+
+model Thread {
+  id          Int         @id @default(autoincrement())
+  type        ThreadType
+  title       String
+  status      ContentStatus @default(VISIBLE)
+
+  // owner (for user-created threads)
+  authorId    Int?
+  author      User?       @relation(fields: [authorId], references: [id])
+
+  // TEAM forum thread association
+  teamId      Int?
+  team        Team?       @relation(fields: [teamId], references: [id])
+
+  // MATCH thread association (optional)
+  matchId     Int?        @unique
+  match       Match?      @relation(fields: [matchId], references: [id])
+
+  // open/close window for match threads
+  openAt      DateTime?
+  closeAt     DateTime?
+
+  posts       Post[]
+  tags        ThreadTag[]
+  polls       Poll[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([teamId])
+  @@index([authorId])
+  @@index([status])
+}
+
+model Tag {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  threads   ThreadTag[]
+}
+
+model ThreadTag {
+  threadId Int
+  tagId    Int
+
+  thread   Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  tag      Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([threadId, tagId])
+  @@index([tagId])
+}
+
+model Post {
+  id        Int       @id @default(autoincrement())
+  threadId  Int
+  authorId  Int
+  status    ContentStatus @default(VISIBLE)
+
+  body      String
+
+  thread    Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author    User   @relation(fields: [authorId], references: [id])
+
+  replies   Reply[]
+  revisions PostRevision[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  flagged   Boolean   @default(false)
+  aiScore     Float?
+  aiComment   String?
+
+  sentimentLabel   String?
+  sentimentScore   Float?
+
+  @@index([threadId, createdAt])
+  @@index([authorId, createdAt])
+  @@index([status])
+}
+
+model PostRevision {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  editorId  Int
+  body      String
+  createdAt DateTime @default(now())
+
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  editor    User @relation(fields: [editorId], references: [id])
+
+  @@index([postId, createdAt])
+}
+
+model Reply {
+  id        Int       @id @default(autoincrement())
+  postId    Int
+  authorId  Int
+  status    ContentStatus @default(VISIBLE)
+
+  body      String
+
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User @relation(fields: [authorId], references: [id])
+
+  revisions ReplyRevision[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  flagged   Boolean   @default(false)
+  aiScore     Float?
+  aiComment   String?
+
+  sentimentLabel   String?
+  sentimentScore   Float?
+
+  @@index([postId, createdAt])
+  @@index([authorId, createdAt])
+  @@index([status])
+}
+
+model ReplyRevision {
+  id        Int      @id @default(autoincrement())
+  replyId   Int
+  editorId  Int
+  body      String
+  createdAt DateTime @default(now())
+
+  reply     Reply @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  editor    User  @relation(fields: [editorId], references: [id])
+
+  @@index([replyId, createdAt])
+}
+
+model Poll {
+  id        Int      @id @default(autoincrement())
+  threadId  Int
+  authorId  Int
+
+  question  String
+  deadline  DateTime
+
+  thread    Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author    User   @relation(fields: [authorId], references: [id])
+
+  options   PollOption[]
+  votes     PollVote[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([threadId])
+  @@index([deadline])
+}
+
+model PollOption {
+  id      Int    @id @default(autoincrement())
+  pollId  Int
+  text    String
+
+  poll    Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes   PollVote[]
+
+  @@index([pollId])
+}
+
+model PollVote {
+  id        Int      @id @default(autoincrement())
+  pollId    Int
+  optionId  Int
+  voterId   Int
+  createdAt DateTime @default(now())
+
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  voter     User       @relation(fields: [voterId], references: [id])
+
+  @@unique([pollId, voterId])
+  @@index([optionId])
+}
+
+model Report {
+  id          Int          @id @default(autoincrement())
+  reporterId  Int
+  reason      String
+  status      ReportStatus @default(OPEN)
+
+  threadId    Int?
+  postId      Int?
+  replyId     Int?
+
+  reporter    User @relation("reportsMade", fields: [reporterId], references: [id])
+
+  //verdict     AIVerdict?
+  actions     ModerationAction[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([threadId])
+  @@index([postId])
+  @@index([replyId])
+}
+/*
+model AIVerdict {
+  id          Int          @id @default(autoincrement())
+  reportId    Int          @unique
+  label       VerdictLabel
+  score       Float?       // 0..1
+  //explanation String?
+
+  report      Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+}
+*/
+model ModerationAction {
+  id         Int      @id @default(autoincrement())
+  reportId   Int
+  adminId    Int
+  action     String   // "DISMISS" / "HIDE_CONTENT" / "BAN_USER"
+  note       String?
+  createdAt  DateTime @default(now())
+
+  report     Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  admin      User   @relation("actionsTaken", fields: [adminId], references: [id])
+
+  @@index([reportId, createdAt])
+  @@index([adminId, createdAt])
+}
+
+model Appeal {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  message   String
+  status    String   @default("OPEN") // OPEN/APPROVED/REJECTED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// Optional: save evternal standings as snapshot
+model StandingsSnapshot {
+  id        Int      @id @default(autoincrement())
+  season    String
+  data      Json
+  fetchedAt DateTime @default(now())
+
+  @@index([season, fetchedAt])
+}
